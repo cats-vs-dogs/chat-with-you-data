@@ -1,0 +1,4 @@
+.env
+training_checkpoints
+.*-checkpoint
+*-checkpoint.ipynb
