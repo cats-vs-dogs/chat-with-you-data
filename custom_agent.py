@@ -6,12 +6,10 @@ from langchain.prompts import StringPromptTemplate
 from langchain.chains import LLMChain
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.tools import Tool
-# from langchain.tools import Tool, BaseTool
 from langchain.schema import AgentAction, AgentFinish, OutputParserException
 from pydantic import BaseModel, Field
 from scipy.stats import norm
 from typing import Union
-# from typing import List, Union
 from dotenv import load_dotenv
 import anvil.server
 import math, re, os
@@ -19,7 +17,7 @@ import math, re, os
 load_dotenv()
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
-anvil.server.connect("server_KNICBILM63PHH7ZNOJ45HGXU-MBANGIRAJW2TWQDC") # update this
+anvil.server.connect("server_VJST2WADPQDVOB3RLHVJSAHI-FR7CKGH6JU6TRQVZ")
 
 llm = ChatOpenAI(model_name='gpt-4',temperature=0)
 # llm = ChatOpenAI(model_name="gpt-3.5-turbo-0613",temperature=0)
@@ -87,19 +85,19 @@ extra_tools.append(RWTool)
 tools = toolkit.get_tools() + list(extra_tools)
 
 template = """
-You are an agent designed to interact with a SQL database and use the information extracted from that database to perform additional calcuations if necessay.
-Given an input question, create a syntactically correct sqlite query to run, then look at the results of the query and return the answer. 
-If the question requires it, use the query result as input to additional calculations that will return the final answer.
-Unless the user specifies a specific number of examples they wish to obtain, always limit your query to at most 5 results.
+You are an agent designed to interact with a SQL database.
+Given an input question, create a syntactically correct sqlite query to run, then look at the results of the query and return the answer.
+Unless the user specifies a specific number of examples they wish to obtain, always limit your query to at most 10 results.
 You can order the results by a relevant column to return the most interesting examples in the database.
 Never query for all the columns from a specific table, only ask for the relevant columns given the question.
-You MUST double check your query before executing it. If you get an error while executing a query, rewrite the query and try again.
-DO NOT make any DML statements (INSERT, UPDATE, DELETE, DROP etc.) to the database.
-You have access to tools for interacting with the database and calculating the final result with data extracted from the database.
+You have access to tools for interacting with the database.
 Only use the below tools. Only use the information returned by the below tools to construct your final answer.
+You MUST double check your query before executing it. If you get an error while executing a query, rewrite the query and try again.
+
+DO NOT make any DML statements (INSERT, UPDATE, DELETE, DROP etc.) to the database.
+
 If the question does not seem related to the database, just return "I don't know" as the answer.
 
-Use the following tools:
 sql_db_query: Input to this tool is a detailed and correct SQL query, output is a result from the database. If the query is not correct, an error message will be returned. If an error is returned, rewrite the query, check the query, and try again. If you encounter an issue with Unknown column 'xxxx' in 'field list', use sql_db_schema to query the correct table fields.
 sql_db_schema: Input to this tool is a comma-separated list of tables, output is the schema and sample rows for those tables. Be sure that the tables actually exist by calling sql_db_list_tables first! Example Input: 'table1, table2, table3'
 sql_db_list_tables: Input is an empty string, output is a comma separated list of tables in the database.
@@ -111,9 +109,11 @@ RWTool:
         LGD - Loss Given Default,
         MATURITY - Remaining maturity of the loan in years,
         SIZE - The size of the client in MEUR, usually this is the client's turnover, 
-        F_LARGE_FIN - If 'Y' the client is a Large Financial Institution               
+        F_LARGE_FIN - If 'Y' the client is a Large Financial Institution        
+        
 
 Use the following format:
+
 Question: the input question you must answer
 Thought: you should always think about what to do
 Action: the action to take, should be one of [sql_db_query, sql_db_schema, sql_db_list_tables, sql_db_query_checker, Calculator, RWTool]
@@ -129,8 +129,9 @@ Previous conversation history:
 {history}
 
 Question: {input}
-Thought: I should look at the tables in the database to see what I can query. Then I should query the schema of the most relevant tables. Based on the question I may need to use the result of the query to carry out additional calcualtion.
+Thought: I should look at the tables in the database to see what I can query. Then I should query the schema of the most relevant tables.
 {agent_scratchpad}
+
 """
 
 class CustomPromptTemplate(StringPromptTemplate):
@@ -175,7 +176,7 @@ agent = LLMSingleActionAgent(
     stop=["\nObservation:"],
     allowed_tools=tool_names
 )
-memory=ConversationBufferWindowMemory(k=4)
+memory=ConversationBufferWindowMemory(k=5)
 agent_executor = AgentExecutor.from_agent_and_tools(agent=agent, tools=tools, verbose=True, memory=memory)
 
 # output = agent_executor.run("What are total RWA and EAD for reporting date 31-12-2022?")
@@ -186,70 +187,3 @@ def give_answer(query):
    return result
 
 anvil.server.wait_forever()
-
-
-# previous
-# llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613")
-# db = SQLDatabase.from_uri("sqlite:///./rwa_data.db")
-# db_chain = SQLDatabaseChain.from_llm(llm, db, verbose=True)
-
-# extract_tools = [    
-#     Tool(
-#         name="rwa_db",
-#         func=db_chain.run,
-#         description="useful for quering a database"
-#     )
-# ]
-
-# extract_agent = initialize_agent(
-#     tools=extract_tools, 
-#     llm=llm, 
-#     agent="zero-shot-react-description", 
-#     verbose=False, 
-#     handle_parsing_errors=True
-# )
-
-# extract_and_calc_tools = [
-#     Tool(
-#         name="risk weight calculator",
-#         func=RW_Calc,
-#         description=
-#         """calculates a loan risk weight give the argulamts: 
-#         Segment - Possible values are 'Bank', 'Corporate', and 'Retail'), 
-#         PD - Probability of Default
-#         LGD - Loss Given Default
-#         m - Remaining maturity of the loan in years
-#         Large_Fin - If 'Y' the client is a Flag for Large Financial Institution, otherwise 'N'
-#         size - size of the client in MEUR, usually this is the client's turnover
-#         mortgage - If 'Y' the exposure is a mortgage loan, otherwise 'N'
-#         revolving - If 'Y' the exposure is a revolving loan, otherwise 'N'
-#         """
-#     ),    
-#     Tool(
-#         name="rwa_db",
-#         func=db_chain.run,
-#         description="useful for quering a database"
-#     )
-# ]
-
-# extract_and_calc_agent = initialize_agent(
-#     tools=extract_and_calc_tools, 
-#     llm=llm, 
-#     agent="zero-shot-react-description", 
-#     verbose=False, 
-#     handle_parsing_errors=True
-# )
-
-# @anvil.server.callable
-# def give_answer_extract(query):
-#    result = extract_agent.run(query)
-#    return result
-
-# @anvil.server.callable
-# def give_answer_extract_and_calc(query):
-#    result = extract_and_calc_agent.run(query)
-#    return result
-
-# anvil.server.wait_forever()
-
-# previous
